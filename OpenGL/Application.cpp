@@ -118,6 +118,8 @@ int main(void)
 		0,3,1
 	};
 
+	// testing contribitions
+
 	// bind the vertices
 	unsigned int buffer, VAO;
 	glGenVertexArrays(1, &VAO);
