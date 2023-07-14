@@ -4,6 +4,11 @@
 #include <fstream>
 #include <string>
 #include <sstream>
+#include "document.h"
+#include <istreamwrapper.h> 
+#include <glm.hpp>
+#include <gtc/matrix_transform.hpp>
+#include <gtc/type_ptr.hpp>
 
 unsigned int loadShader(const unsigned int type, const std::string& source) {
 	unsigned int shaderId = glCreateShader(type);
@@ -35,7 +40,7 @@ struct ShaderSource {
 };
 
 ShaderSource getShaderFromFile(const std::string& filePath) {
-	
+
 	std::ifstream stream(filePath);
 	std::string line;
 	std::stringstream ss[2];
@@ -44,6 +49,7 @@ ShaderSource getShaderFromFile(const std::string& filePath) {
 		None = -1, Vertex = 0, Fragment = 1
 	};
 	ShaderType type = ShaderType::None;
+
 
 	while (getline(stream, line)) {
 		if (line.find("#shader") != std::string::npos) {
@@ -79,6 +85,46 @@ unsigned int loadShaders(const std::string& vertexShader, const std::string& fra
 	return program;
 }
 
+struct ReturnStruct {
+	float* vertices;
+	unsigned int* indices;
+	int vSize = 0;
+	int iSize = 0;
+};
+
+ReturnStruct parseJson(const char* filePath) {
+	std::ifstream ifs(filePath);
+	rapidjson::IStreamWrapper isw(ifs);
+	rapidjson::Document document;
+	document.ParseStream(isw);
+
+	if (document.HasParseError()) {
+		std::cout << "Error : " << document.GetParseError() << '\n';
+		std::cout << "Offset : " << document.GetErrorOffset() << '\n';
+	}
+
+	const auto& object = document.FindMember("geometry_object")->value;
+	const auto& verts = object.FindMember("vertices")->value;
+	const auto& indx = object.FindMember("triangles")->value;
+
+	int vertsSize = verts.Size();
+	int indeciesSize = indx.Size();
+
+	float* vertices = new float[vertsSize];
+	unsigned int* indices = new unsigned int[indeciesSize];
+
+	int i = 0;
+	for (; i < vertsSize; i++) {
+		vertices[i] = verts.GetArray()[i].GetFloat();
+	}
+	i = 0;
+	for (; i < indeciesSize; i++) {
+		indices[i] = (unsigned int)indx.GetArray()[i].GetInt();
+	}
+
+	return { vertices , indices, vertsSize, indeciesSize };
+}
+
 int main(void)
 {
 	GLFWwindow* window;
@@ -102,24 +148,25 @@ int main(void)
 	}
 
 	std::cout << glGetString(GL_VERSION) << "\n";
-	 
+
 	auto shaderSource = getShaderFromFile("res/Basic.shader");
 	unsigned int shader = loadShaders(shaderSource.VertexShader, shaderSource.FragmentShader);
 
-	float vertices[] = {
-	   -0.5f, -0.5f,
-	   0.5f,    0.5f,
-	   0.5f,   -0.5f,
-	   -0.5f,   0.5f
-	};
+	const char* filePath = "res/teapot.json";
+	auto res = parseJson(filePath);
 
-	unsigned int indices[] = {
-		0, 1, 2,
-		0,3,1
-	};
+	//float vertices[] = {
+	//   -0.5f, -0.5f,
+	//   0.5f,    0.5f,
+	//   0.5f,   -0.5f,
+	//   -0.5f,   0.5f
+	//};
 
-	// testing contribitions
-
+	//unsigned int indices[] = {
+	//	0, 1, 2,
+	//	//0,3,1
+	//};  
+	
 	// bind the vertices
 	unsigned int buffer, VAO;
 	glGenVertexArrays(1, &VAO);
@@ -127,20 +174,30 @@ int main(void)
 	glBindVertexArray(VAO);
 
 	glBindBuffer(GL_ARRAY_BUFFER, buffer);
-	glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+	glBufferData(GL_ARRAY_BUFFER, sizeof(res.vertices[0]) * res.vSize, res.vertices, GL_STATIC_DRAW);
 
-	glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), 0);
+	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), 0);
 	glEnableVertexAttribArray(0);
 
 	// bind the indices
 	unsigned int ibo;
 	glGenBuffers(1, &ibo);
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ibo);
-	glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
+	glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(res.indices[0]) * res.iSize, res.indices, GL_STATIC_DRAW);
 
 	glUseProgram(shader);
-	int location = glGetUniformLocation(shader, "u_Color");
-	
+	int uniformColor = glGetUniformLocation(shader, "u_Color");
+
+	//glm::mat4 proj = glm::ortho(-80.f, 80.f, -80.f, 80.f, -1.f, 1.f);
+
+	glm::mat4 proj = glm::ortho(-2.f, 2.f, -2.f, 2.f, -1.f, 1.f);
+	//glm::mat4 view = glm::translate(glm::mat4(1.f), glm::vec3(0,0));
+	//glm::mat4 model = glm::translate(glm::mat4(1.f), glm::vec3(-10.f, 4.f, 0.f));
+
+
+	int unifromProjection = glGetUniformLocation(shader, "u_MVP");
+	glUniformMatrix4fv(unifromProjection, 1, false, glm::value_ptr(proj));
+
 	float r = 0.f;
 	float incrementAmount = 0.005f;
 	while (!glfwWindowShouldClose(window))
@@ -156,8 +213,10 @@ int main(void)
 		glClear(GL_COLOR_BUFFER_BIT);
 
 		glBindVertexArray(VAO);
-		glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, nullptr);
-		glUniform4f(location, r, 0.5f, 0.2f, 1.0f);
+		glDrawElements(GL_TRIANGLES, res.iSize, GL_UNSIGNED_INT, nullptr);
+		glGetError();
+
+		glUniform4f(uniformColor, r, 0.5f, 0.2f, 1.0f);
 
 		r += incrementAmount;
 
